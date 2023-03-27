@@ -2,27 +2,16 @@
 #![no_std]
 #![no_main]
 
-mod efi;
+mod panic;
+pub mod efi;
 
-use core::panic::PanicInfo;
 use core::sync::atomic::Ordering;
 use crate::efi::{EfiSystemTable, EfiHandle, EfiStatus, EFI_SYSTEM_TABLE, EfiSimpleTextOutputProtocol, initialize_system_table};
 
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    print!("!!! PANIC !!!\n");
-    if let Some(location) = info.location() {
-        print!("In file {:?}, at line {:?}...\n", location.file(), location.line());
-    } else {
-        print!("Can't get panic location...\n");
-    }
-    if let Some(message) = info.message() {
-        print!("{}\n", message);
-    } else {
-        print!("Can't get panic message...\n");
-    }
-    loop {}
-}
+// TODO: Write function to get system table easily without dereferencing it every time(maybe)
+// TODO: Refactor print logic in it own module
+// TODO: Document EFI structures that we need
+// TODO: Refactor out_str in another file
 
 // Takes a `str` slice as input and displays it in the default UEFI ConsoleOut device
 fn out_str(to_print: &str) {
@@ -93,17 +82,7 @@ macro_rules! print {
 
 #[no_mangle]
 extern "C" fn efi_main(_image_handle: EfiHandle, system_table: *mut EfiSystemTable) -> EfiStatus {
-    unsafe {
-        initialize_system_table(system_table);
-
-        // Load the EFI system table
-        let sys_table = EFI_SYSTEM_TABLE.load(Ordering::SeqCst);
-
-        // If there is a null pointer, we cannot print
-        if sys_table.is_null() {
-            panic!();
-        }
-        print!("{:b}", (*sys_table).hdr.revision());
-        panic!("Prea Mult Gogosi, dar nu e niciodata prea tarziu sa mai pui niste gogosi");
-    }
+    initialize_system_table(system_table);
+    print!("{}", 2 + 2);
+    panic!("Prea Mult Gogosi, dar nu e niciodata prea tarziu sa mai pui niste gogosi");
 }
