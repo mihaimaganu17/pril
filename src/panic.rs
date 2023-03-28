@@ -1,12 +1,16 @@
-use core::panic::PanicInfo;
-use core::fmt::Write;
 use crate::{print, ConsoleOutWriter};
+use core::fmt::Write;
+use core::panic::PanicInfo;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     print!("!!! PANIC !!!\n");
     if let Some(location) = info.location() {
-        print!("In file {:?}, at line {:?}...\n", location.file(), location.line());
+        print!(
+            "In file {:?} at line {:?}...\n",
+            location.file(),
+            location.line(),
+        );
     } else {
         print!("Can't get panic location...\n");
     }
