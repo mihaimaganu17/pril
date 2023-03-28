@@ -1,4 +1,6 @@
 //! Module that acts as a central point for FFI bindings from the UEFI API
+pub mod boot_services;
+
 use core::sync::atomic::{AtomicPtr, Ordering};
 
 // Signature, that resides as the first field in the UEFI System Table. We check this to make sure
@@ -89,6 +91,7 @@ pub fn uefi_print(input: &str) {
 }
 
 /// Data structure that precedes all of the standard EFI table types.
+#[derive(Debug)]
 #[repr(C)]
 pub struct EfiTableHeader {
     // A 64-bit signature that identifies the type of table that follows. Unique signatures have
@@ -163,8 +166,7 @@ pub struct EfiSystemTable {
     _std_err: usize,
     // A pointer to the EFI Runtime Services Table.
     _runtime_services: usize,
-    // A pointer to the EFI Boot Services Table. See
-    // ref:efi-boot-services-table_efi_system_table.
+    // A pointer to the EFI Boot Services Table.
     _boot_services: usize,
     // The number of system configuration tables in the buffer ConfigurationTable.
     _ntable_entries: usize,
