@@ -26,7 +26,13 @@ pub struct EfiBootServicesTable {
     _allocate_pages: usize,
     _free_pages: usize,
     // Returns the current boot services memory map and memory map key
-    get_memory_map: usize,
+    pub get_memory_map: fn(
+        memory_map_size: *mut usize,
+        memory_map: *mut [u8],
+        map_key: *const usize,
+        descriptor_size: *const usize,
+        descriptor_version: *const u32,
+    ),
     _allocate_pool: usize,
     _free_pool: usize,
     //
@@ -99,6 +105,9 @@ pub struct EfiBootServicesTable {
     _create_event_ex: usize,
 }
 
+/// This is the size of the buffer we use to retrieve the memory map from UEFI
+pub const MEMORY_MAP_BUFFER_SIZE: usize = 4 * 1024;
+
 impl EfiBootServicesTable {
     /// Returns the current boot services memory map and memory map key where
     /// - `memory_map_size` is a pointer to the size, in bytes, of the `memory_map` buffer.
@@ -113,15 +122,7 @@ impl EfiBootServicesTable {
     /// bytes, of an individual `EfiMemoryDescriptor`.
     /// - `descriptor_version` is a pointer to the location in which firmware returns the version
     /// number associated with the `EfiMemoryDescriptor`.
-    pub fn get_memory_map(
-        memory_map_size: usize,
-        memory_map: &mut [u8],
-        map_key: usize,
-        descriptor_size: usize,
-        descriptor_version: usize,
-    ) -> EfiStatus {
-        0
-    }
+    pub fn _memory_map() {}
 }
 
 // Type that represents a UEFI Physical Address
@@ -134,10 +135,10 @@ const EFI_MEMORY_DESCRIPTOR_VERSION: u8 = 1;
 
 /// Structure that describes a single memory map entry from `EfiBootServicesTable` memory map
 #[derive(Debug)]
-#[repr(C)]
+#[repr(packed, C)]
 pub struct EfiMemoryDescriptor {
     // Type of the memory region
-    mem_type: EfiMemoryType,
+    mem_type: u32,//EfiMemoryType,
     // Physical start regions, which must be aligned on a 4KiB boundary and must not be
     // above 0xffff_ffff_ffff_f000
     phys_start: EfiPhysicalAddress,
@@ -153,8 +154,106 @@ pub struct EfiMemoryDescriptor {
     attr_mask: EfiMemoryAttributes,
 }
 
+/// Structure that describes the types of memory from the system, according to the UEFI Memory Map
+/// Each memory type has one purpose BEFORE exiting Boot Services and another one after exiting
+/// Boot Services
 #[derive(Debug)]
+#[repr(C)]
 pub enum EfiMemoryType {
+    /// Before exiting Boot Sevices
+    /// Not usable.
+    /// After exiting Boot Services
+    /// Not usable.
+    ReservedMemoryType = 0,
+    /// Before exiting Boot Sevices
+    /// The code portions of a loaded UEFI application.
+    /// After exiting Boot Services
+    /// The UEFI OS Loader and/or OS may use this memory as they see fit. Note: the UEFI OS loader
+    /// that called EFI_BOOT_SERVICES.ExitBootServices() is utilizing one or more EfiLoaderCode
+    /// ranges.
+    LoaderCode,
+    /// Before exiting Boot Sevices
+    /// The data portions of a loaded UEFI application and the default data allocation type used by
+    /// a UEFI application to allocate pool memory.
+    /// After exiting Boot Services
+    /// The Loader and/or OS may use this memory as they see fit. Note: the OS loader that called
+    /// ExitBootServices() is utilizing one or more EfiLoaderData ranges.
+    LoaderData,
+    /// Before exiting Boot Sevices
+    /// The code portions of a loaded UEFI Boot Service Driver.
+    /// After exiting Boot Services
+    /// Memory available for general use.
+    BootServicesCode,
+    /// Before exiting Boot Sevices
+    /// The data portions of a loaded UEFI Boot Serve Driver, and the default data allocation type
+    /// used by a UEFI Boot Service Driver to allocate pool memory.
+    /// After exiting Boot Services
+    /// Memory available for general use.
+    BootServicesData,
+    /// Before exiting Boot Sevices
+    /// The code portions of a loaded UEFI Runtime Driver.
+    /// After exiting Boot Services
+    /// The memory in this range is to be preserved by the UEFI OS loader and OS in the working and
+    /// ACPI S1–S3 states.
+    RuntimeServicesCode,
+    /// Before exiting Boot Sevices
+    /// The data portions of a loaded UEFI Runtime Driver and the default data allocation type used
+    /// by a UEFI Runtime Driver to allocate pool memory.
+    /// After exiting Boot Services
+    /// The memory in this range is to be preserved by the UEFI OS l loader and OS in the working
+    /// and ACPI S1–S3 states.
+    RuntimeServicesData,
+    /// Before exiting Boot Sevices
+    /// Free (unallocated) memory.
+    /// After exiting Boot Services
+    /// Memory available for general use.
+    ConventionalMemory,
+    /// Before exiting Boot Sevices
+    /// Memory in which errors have been detected.
+    /// After exiting Boot Services
+    /// Memory that contains errors and is not to be used.
+    UnusableMemory,
+    /// Before exiting Boot Sevices
+    /// Memory that holds the ACPI tables.
+    /// After exiting Boot Services
+    /// This memory is to be preserved by the UEFI OS loader and OS until ACPI is enabled. Once
+    /// ACPI is enabled, the memory in this range is available for general use.
+    ACPIReclaimMemory,
+    /// Before exiting Boot Sevices
+    /// Address space reserved for use by the firmware.
+    /// After exiting Boot Services
+    /// This memory is to be preserved by the UEFI OS loader and OS in the working and ACPI S1–S3
+    /// states.
+    ACPIMemoryNVS,
+    /// Before exiting Boot Sevices
+    /// Used by system firmware to request that a memory-mapped IO region be mapped by the OS to a
+    /// virtual address so it can be accessed by EFI runtime services.
+    /// After exiting Boot Services
+    /// This memory is not used by the OS. All system memory-mapped IO information should come from
+    /// ACPI tables.
+    MemoryMappedIO,
+    /// Before exiting Boot Sevices
+    /// System memory-mapped IO region that is used to translate memory cycles to IO cycles by the
+    /// processor.
+    /// After exiting Boot Services
+    /// This memory is not used by the OS. All system memory-mapped IO port space information
+    /// should come from ACPI tables.
+    MemoryMappedIOPortSpace,
+    /// Before exiting Boot Sevices
+    /// Address space reserved by the firmware for code that is part of the processor.
+    /// After exiting Boot Services
+    /// This memory is to be preserved by the UEFI OS loader and OS in the working and ACPI S1–S4
+    /// states. This memory may also have other attributes that are defined by the processor
+    /// implementation.
+    PalCode,
+    /// Before exiting Boot Sevices
+    /// A memory region that operates as EfiConventionalMemory. However, it happens to also support
+    /// byte-addressable non-volatility.
+    /// After exiting Boot Services
+    /// Same as Before exiting
+    PersistentMemory,
+    /// Before exiting Boot Sevices
+    MaxMemoryType,
 }
 
 bitflags! {
