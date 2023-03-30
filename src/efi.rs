@@ -1,8 +1,11 @@
 //! Module that acts as a central point for FFI bindings from the UEFI API
 pub mod boot_services;
+pub mod status;
 
 use core::sync::atomic::{AtomicPtr, Ordering};
 use boot_services::EfiBootServicesTable;
+pub use boot_services::get_memory_map;
+pub use status::*;
 
 // Signature, that resides as the first field in the UEFI System Table. We check this to make sure
 // we actually are in an UEFI system
@@ -168,50 +171,12 @@ pub struct EfiSystemTable {
     // A pointer to the EFI Runtime Services Table.
     _runtime_services: usize,
     // A pointer to the EFI Boot Services Table.
-    boot_services: EfiBootServicesTable,
+    boot_services: *const EfiBootServicesTable,
     // The number of system configuration tables in the buffer ConfigurationTable.
     _ntable_entries: usize,
     // A pointer to the system configuration tables. The number of entries in the table is
     // NumberOfTableEntries
     _config_table: usize,
-}
-
-pub fn get_memory_map() {
-    use crate::efi::EFI_SYSTEM_TABLE;
-    use core::sync::atomic::Ordering;
-
-    use crate::print;
-    use crate::ConsoleOutWriter;
-    use core::fmt::Write;
-    use boot_services::EfiMemoryDescriptor;
-    use boot_services::MEMORY_MAP_BUFFER_SIZE;
-
-    let sys_table = EFI_SYSTEM_TABLE.load(Ordering::SeqCst);
-    if sys_table.is_null() {
-        return;
-    }
-
-    let boot_services = unsafe { &(*sys_table).boot_services };
-    let mut memory_map_size = MEMORY_MAP_BUFFER_SIZE;
-    let mut memory_map = [0; MEMORY_MAP_BUFFER_SIZE];
-    let map_key: usize = 0;
-    let descriptor_size: usize = 0;
-    let descriptor_version: u32 = 0;
-
-    (boot_services.get_memory_map)(
-        &mut memory_map_size,
-        memory_map.as_mut(),
-        &map_key,
-        &descriptor_size,
-        &descriptor_version,
-    );
-
-    for idx in (0..memory_map_size).step_by(descriptor_size) {
-        let entry = unsafe {
-            core::ptr::read_unaligned(memory_map.get(idx..idx+descriptor_size).unwrap().as_ptr() as *const EfiMemoryDescriptor);
-        };
-        print!("{:#?}", entry);
-    }
 }
 
 /// The Simple Text Output Protocol defines the minimum requirements for a text-based `ConsoleOut`

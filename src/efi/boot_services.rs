@@ -1,6 +1,7 @@
 //! Module that handles all of the EFI Boot Services table functions
 use bitflags::bitflags;
-use crate::{EfiStatus, efi::EfiTableHeader};
+use crate::{EfiStatus, print, efi::{status, EFI_SYSTEM_TABLE, EfiTableHeader}};
+use core::sync::atomic::Ordering;
 
 /// Signature for the `EfiBootServicesTable` structure
 pub const EFI_BOOT_SERVICES_SIGNATURE: u64 = 0x5652_4553_544f_4f42;
@@ -27,12 +28,12 @@ pub struct EfiBootServicesTable {
     _free_pages: usize,
     // Returns the current boot services memory map and memory map key
     pub get_memory_map: fn(
-        memory_map_size: *mut usize,
+        memory_map_size: *const usize,
         memory_map: *mut [u8],
         map_key: *const usize,
         descriptor_size: *const usize,
         descriptor_version: *const u32,
-    ),
+    ) -> EfiStatus,
     _allocate_pool: usize,
     _free_pool: usize,
     //
@@ -106,23 +107,75 @@ pub struct EfiBootServicesTable {
 }
 
 /// This is the size of the buffer we use to retrieve the memory map from UEFI
-pub const MEMORY_MAP_BUFFER_SIZE: usize = 4 * 1024;
+pub const MEMORY_MAP_BUFFER_SIZE: usize = 8 * 1024;
 
-impl EfiBootServicesTable {
-    /// Returns the current boot services memory map and memory map key where
-    /// - `memory_map_size` is a pointer to the size, in bytes, of the `memory_map` buffer.
-    /// On input, this is the size of the buffer allocated by the caller.
-    /// On output, it is the size of the buffer returned by the firmware if the buffer was large
-    /// enough, or the size of the buffer needed to contain the map if the buffer was too small.
-    /// - `memory_map` is a pointer to the buffer in which firmware places the current memory map.
-    /// The map is an array of `EfiMemoryDescriptor`s
-    /// - `map_key` is a pointer to the location in which firmware returns the key for the current
-    /// memory map.
-    /// - `descriptor_size` is a pointer to the location in which firmware returns the size, in
-    /// bytes, of an individual `EfiMemoryDescriptor`.
-    /// - `descriptor_version` is a pointer to the location in which firmware returns the version
-    /// number associated with the `EfiMemoryDescriptor`.
-    pub fn _memory_map() {}
+/// Returns the current boot services memory map and memory map key where
+/// - `memory_map_size` is a pointer to the size, in bytes, of the `memory_map` buffer.
+/// On input, this is the size of the buffer allocated by the caller.
+/// On output, it is the size of the buffer returned by the firmware if the buffer was large
+/// enough, or the size of the buffer needed to contain the map if the buffer was too small.
+/// - `memory_map` is a pointer to the buffer in which firmware places the current memory map.
+/// The map is an array of `EfiMemoryDescriptor`s
+/// - `map_key` is a pointer to the location in which firmware returns the key for the current
+/// memory map.
+/// - `descriptor_size` is a pointer to the location in which firmware returns the size, in
+/// bytes, of an individual `EfiMemoryDescriptor`.
+/// - `descriptor_version` is a pointer to the location in which firmware returns the version
+/// number associated with the `EfiMemoryDescriptor`.
+pub fn get_memory_map() {
+    // Get a hold of the global EFI System Table
+    let sys_table = EFI_SYSTEM_TABLE.load(Ordering::SeqCst);
+
+    // Check if it is a valid pointer
+    if sys_table.is_null() {
+        return;
+    }
+
+    // Get a reference to the boot services table
+    let boot_services_table = unsafe { (*sys_table).boot_services };
+    let memory_map_size: usize = MEMORY_MAP_BUFFER_SIZE;
+    let mut memory_map = [0; MEMORY_MAP_BUFFER_SIZE];
+    let map_key: usize = 0;
+    let descriptor_size: usize = 0;
+    let descriptor_version: u32 = 0;
+
+    let status = unsafe {((*boot_services_table).get_memory_map)(
+        &memory_map_size,
+        memory_map.as_mut(),
+        &map_key,
+        &descriptor_size,
+        &descriptor_version,
+    )};
+
+    match status {
+        status::EFI_BUFFER_TOO_SMALL => {
+            // The memory map buffer was too small
+            print!("Memory map size is too small! Retrying with size: {}\n", memory_map_size);
+            // If we cannot obtain a memory map the second time, just panic
+            if status != status::EFI_SUCCESS {
+                panic!("Cannot get the memory map, even with the right size\n");
+            }
+        }
+        status::EFI_INVALID_PARAMETER => {
+            // The memory_map buffer is NULL. This should be impossible and we will panic if this
+            // is the case
+            panic!("Memory map buffer is NULL\n");
+        }
+        status::EFI_SUCCESS => {
+            print!("Successfully got a memory map!\n");
+        }
+        _ => { panic!("Unknown get memory map status code {}", status); }
+    };
+
+    for idx in (0..memory_map_size).step_by(descriptor_size) {
+        let entry = unsafe {
+            core::ptr::read_unaligned(
+                memory_map.get(idx..idx+descriptor_size).unwrap().as_ptr()  as *const EfiMemoryDescriptor)
+        };
+        if idx < 50 {
+            print!("{:#x?}", entry);
+        }
+    }
 }
 
 // Type that represents a UEFI Physical Address
@@ -131,14 +184,14 @@ type EfiPhysicalAddress = u64;
 type EfiVirtualAddress = u64;
 
 // Memory descriptor version number
-const EFI_MEMORY_DESCRIPTOR_VERSION: u8 = 1;
+const _EFI_MEMORY_DESCRIPTOR_VERSION: u8 = 1;
 
 /// Structure that describes a single memory map entry from `EfiBootServicesTable` memory map
 #[derive(Debug)]
 #[repr(packed, C)]
 pub struct EfiMemoryDescriptor {
     // Type of the memory region
-    mem_type: u32,//EfiMemoryType,
+    mem_type: EfiMemoryType,//EfiMemoryType,
     // Physical start regions, which must be aligned on a 4KiB boundary and must not be
     // above 0xffff_ffff_ffff_f000
     phys_start: EfiPhysicalAddress,
@@ -157,14 +210,14 @@ pub struct EfiMemoryDescriptor {
 /// Structure that describes the types of memory from the system, according to the UEFI Memory Map
 /// Each memory type has one purpose BEFORE exiting Boot Services and another one after exiting
 /// Boot Services
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub enum EfiMemoryType {
     /// Before exiting Boot Sevices
     /// Not usable.
     /// After exiting Boot Services
     /// Not usable.
-    ReservedMemoryType = 0,
+    ReservedMemoryType,
     /// Before exiting Boot Sevices
     /// The code portions of a loaded UEFI application.
     /// After exiting Boot Services

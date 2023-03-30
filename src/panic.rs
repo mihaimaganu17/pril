@@ -1,6 +1,5 @@
-use crate::{print, ConsoleOutWriter};
-use core::fmt::Write;
 use core::panic::PanicInfo;
+use crate::print;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
