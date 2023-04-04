@@ -6,12 +6,18 @@ pub mod efi;
 pub mod print;
 mod panic;
 
-use crate::efi::{get_memory_map, initialize_system_table, EfiHandle, EfiStatus, EfiSystemTable};
+use crate::efi::{get_memory_map, initialize_system_table, exit_boot_services, EfiHandle, EfiStatus, EfiSystemTable};
 
 #[no_mangle]
-extern "C" fn efi_main(_image_handle: EfiHandle, system_table: *mut EfiSystemTable) -> EfiStatus {
+extern "C" fn efi_main(image_handle: EfiHandle, system_table: *mut EfiSystemTable) -> EfiStatus {
     initialize_system_table(system_table);
-    get_memory_map();
-    print!("{}", 2 + 2);
-    panic!("Prea Mult Gogosi, dar nu e niciodata prea tarziu sa mai pui niste gogosi");
+
+    let map_key = get_memory_map();
+
+    assert!(map_key != 0);
+
+    print!("This is a formatted string {:?}!!!\n", 2+2);
+
+    //exit_boot_services(image_handle, map_key);
+    panic!("Pril finished running\n");
 }

@@ -1,6 +1,6 @@
 //! Module that handles all of the EFI Boot Services table functions
 use bitflags::bitflags;
-use crate::{EfiStatus, print, efi::{status, EFI_SYSTEM_TABLE, EfiTableHeader}};
+use crate::{EfiHandle, EfiStatus, print, efi::{status, EFI_SYSTEM_TABLE, EfiTableHeader}};
 use core::sync::atomic::Ordering;
 
 /// Signature for the `EfiBootServicesTable` structure
@@ -10,7 +10,6 @@ pub const EFI_BOOT_SERVICES_SIGNATURE: u64 = 0x5652_4553_544f_4f42;
 /// boot services as described in the Boot Service chapter from any UEFI Spec.
 /// The function pointers in this table are not valied after the OS has taken control of the
 /// platform with a call to `exit_boot_services`.
-#[derive(Debug)]
 #[repr(C)]
 pub struct EfiBootServicesTable {
     /// Header for this table
@@ -28,11 +27,11 @@ pub struct EfiBootServicesTable {
     _free_pages: usize,
     // Returns the current boot services memory map and memory map key
     pub get_memory_map: fn(
-        memory_map_size: *const usize,
-        memory_map: *mut [u8],
-        map_key: *const usize,
-        descriptor_size: *const usize,
-        descriptor_version: *const u32,
+        memory_map_size: &mut usize,
+        memory_map: *mut u8,
+        map_key: &mut usize,
+        descriptor_size: &mut usize,
+        descriptor_version: &mut u32,
     ) -> EfiStatus,
     _allocate_pool: usize,
     _free_pool: usize,
@@ -65,7 +64,7 @@ pub struct EfiBootServicesTable {
     _exit: usize,
     _image_unload: usize,
     /// Terminates boot services
-    exit_boot_services: usize,
+    exit_boot_services: fn(image_handle: EfiHandle, map_key: usize) -> EfiStatus,
     //
     // Miscellaneous Services, all from EFI 1.0+
     //
@@ -122,31 +121,35 @@ pub const MEMORY_MAP_BUFFER_SIZE: usize = 8 * 1024;
 /// bytes, of an individual `EfiMemoryDescriptor`.
 /// - `descriptor_version` is a pointer to the location in which firmware returns the version
 /// number associated with the `EfiMemoryDescriptor`.
-pub fn get_memory_map() {
+///
+/// This function returns the map key obtained from a `get_memory_map` call
+pub fn get_memory_map()->usize {//image_handle: EfiHandle) -> usize {
     // Get a hold of the global EFI System Table
     let sys_table = EFI_SYSTEM_TABLE.load(Ordering::SeqCst);
 
     // Check if it is a valid pointer
     if sys_table.is_null() {
-        return;
+        return 0;
     }
 
     // Get a reference to the boot services table
     let boot_services_table = unsafe { (*sys_table).boot_services };
-    let memory_map_size: usize = MEMORY_MAP_BUFFER_SIZE;
-    let mut memory_map = [0; MEMORY_MAP_BUFFER_SIZE];
-    let map_key: usize = 0;
-    let descriptor_size: usize = 0;
-    let descriptor_version: u32 = 0;
+    let mut memory_map_size: usize = MEMORY_MAP_BUFFER_SIZE;
+    let mut memory_map = [0u8; MEMORY_MAP_BUFFER_SIZE];
+    let mut map_key: usize = 0;
+    let mut descriptor_size: usize = 0;
+    let mut descriptor_version: u32 = 0;
 
     let status = unsafe {((*boot_services_table).get_memory_map)(
-        &memory_map_size,
-        memory_map.as_mut(),
-        &map_key,
-        &descriptor_size,
-        &descriptor_version,
+        &mut memory_map_size,
+        memory_map.as_mut_ptr(),
+        &mut map_key,
+        &mut descriptor_size,
+        &mut descriptor_version,
     )};
 
+    // Printing affects the memory map, and the map key will change. However, if our status
+    // is not successful we want to know about it
     match status {
         status::EFI_BUFFER_TOO_SMALL => {
             // The memory map buffer was too small
@@ -162,7 +165,7 @@ pub fn get_memory_map() {
             panic!("Memory map buffer is NULL\n");
         }
         status::EFI_SUCCESS => {
-            print!("Successfully got a memory map!\n");
+            //print!("Successfully got a memory map!\n");
         }
         _ => { panic!("Unknown get memory map status code {}", status); }
     };
@@ -170,12 +173,31 @@ pub fn get_memory_map() {
     for idx in (0..memory_map_size).step_by(descriptor_size) {
         let entry = unsafe {
             core::ptr::read_unaligned(
-                memory_map.get(idx..idx+descriptor_size).unwrap().as_ptr()  as *const EfiMemoryDescriptor)
+                memory_map.get(idx..).unwrap().as_ptr()  as *const EfiMemoryDescriptor)
         };
-        if idx < 50 {
-            print!("{:#x?}", entry);
-        }
+
+        let mem_type: EfiMemoryType = entry.mem_type.into();
     }
+
+    map_key
+}
+
+pub fn exit_boot_services(image_handle: EfiHandle, map_key: usize) {
+    // Get a hold of the global EFI System Table
+    let sys_table = EFI_SYSTEM_TABLE.load(Ordering::SeqCst);
+
+    // Check if it is a valid pointer
+    if sys_table.is_null() {
+        return;
+    }
+
+    // Get a reference to the boot services table
+    let boot_services_table = unsafe { (*sys_table).boot_services };
+
+    let status = unsafe { ((*boot_services_table).exit_boot_services)(image_handle, map_key) };
+    assert!(status == status::EFI_SUCCESS);
+
+    EFI_SYSTEM_TABLE.store(core::ptr::null_mut(), Ordering::SeqCst);
 }
 
 // Type that represents a UEFI Physical Address
@@ -191,7 +213,7 @@ const _EFI_MEMORY_DESCRIPTOR_VERSION: u8 = 1;
 #[repr(packed, C)]
 pub struct EfiMemoryDescriptor {
     // Type of the memory region
-    mem_type: EfiMemoryType,//EfiMemoryType,
+    mem_type: u32,
     // Physical start regions, which must be aligned on a 4KiB boundary and must not be
     // above 0xffff_ffff_ffff_f000
     phys_start: EfiPhysicalAddress,
@@ -204,7 +226,30 @@ pub struct EfiMemoryDescriptor {
     number_pages: u64,
     // Attributes of the memory region that describe the bit mask capabilities for that memory
     // region and not necessarily the current settings for that memory region.
-    attr_mask: EfiMemoryAttributes,
+    attr_mask: u64,//EfiMemoryAttributes,
+}
+
+impl From<u32> for EfiMemoryType {
+    fn from(value: u32) -> Self {
+        match value {
+            0 => Self::ReservedMemoryType,
+            1 => Self::LoaderCode,
+            2 => Self::LoaderData,
+            3 => Self::BootServicesCode,
+            4 => Self::BootServicesData,
+            5 => Self::RuntimeServicesCode,
+            6 => Self::RuntimeServicesData,
+            7 => Self::ConventionalMemory,
+            8 => Self::UnusableMemory,
+            9 => Self::ACPIReclaimMemory,
+            10 => Self::ACPIMemoryNVS,
+            11 => Self::MemoryMappedIO,
+            12 => Self::MemoryMappedIOPortSpace,
+            13 => Self::PalCode,
+            14 => Self::PersistentMemory,
+            _ => Self::MaxMemoryType,
+        }
+    }
 }
 
 /// Structure that describes the types of memory from the system, according to the UEFI Memory Map
@@ -217,7 +262,7 @@ pub enum EfiMemoryType {
     /// Not usable.
     /// After exiting Boot Services
     /// Not usable.
-    ReservedMemoryType,
+    ReservedMemoryType = 0,
     /// Before exiting Boot Sevices
     /// The code portions of a loaded UEFI application.
     /// After exiting Boot Services

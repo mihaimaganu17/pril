@@ -4,7 +4,7 @@ pub mod status;
 
 use core::sync::atomic::{AtomicPtr, Ordering};
 use boot_services::EfiBootServicesTable;
-pub use boot_services::get_memory_map;
+pub use boot_services::{get_memory_map, exit_boot_services};
 pub use status::*;
 
 // Signature, that resides as the first field in the UEFI System Table. We check this to make sure
