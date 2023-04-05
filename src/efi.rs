@@ -173,10 +173,46 @@ pub struct EfiSystemTable {
     // A pointer to the EFI Boot Services Table.
     boot_services: *const EfiBootServicesTable,
     // The number of system configuration tables in the buffer ConfigurationTable.
-    _ntable_entries: usize,
+    ntable_entries: usize,
     // A pointer to the system configuration tables. The number of entries in the table is
     // NumberOfTableEntries
-    _config_table: usize,
+    config_table: *const EfiConfigurationTable,
+}
+
+// TODO: We should wrap these types intead so it is stronger typed
+type EfiGuid = u128;
+
+#[derive(Debug)]
+#[repr(packed, C)]
+pub struct EfiConfigurationTable {
+    // The 128-bit GUID value that uniquely identifies the system configuration table.
+    pub vendor_guid: EfiGuid,
+    // A pointer to the table associated with `vendor_guid`
+    pub vendor_table: usize,
+}
+
+pub fn read_config_table() {
+    // Get a handle to the EfiSystemTable
+    let sys_table = EFI_SYSTEM_TABLE.load(Ordering::SeqCst);
+
+    if sys_table.is_null() {
+        return;
+    }
+
+    unsafe {
+        let config_table = (*sys_table).config_table;
+        let end_config_table = config_table as usize + (*sys_table).ntable_entries * 3 * 8;
+
+        let mut cur_entry = 0;
+        while cur_entry < (*sys_table).ntable_entries {
+            let entry_addr = config_table as usize + cur_entry * 3 * 8;
+            let table_entry =
+                core::ptr::read_unaligned(entry_addr as *const EfiConfigurationTable);
+            let guid = table_entry.vendor_guid;
+            crate::print!("{:x?}\n", guid);
+            cur_entry += 1;
+        }
+    }
 }
 
 /// The Simple Text Output Protocol defines the minimum requirements for a text-based `ConsoleOut`

@@ -16,6 +16,8 @@ extern "C" fn efi_main(image_handle: EfiHandle, system_table: *mut EfiSystemTabl
 
     assert!(map_key != 0);
 
+    crate::efi::read_config_table();
+
     print!("This is a formatted string {:?}!!!\n", 2+2);
 
     //exit_boot_services(image_handle, map_key);
