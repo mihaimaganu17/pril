@@ -176,7 +176,7 @@ pub fn get_memory_map()->usize {//image_handle: EfiHandle) -> usize {
                 memory_map.get(idx..).unwrap().as_ptr()  as *const EfiMemoryDescriptor)
         };
 
-        let mem_type: EfiMemoryType = entry.mem_type.into();
+        let _mem_type: EfiMemoryType = entry.mem_type.into();
     }
 
     map_key

@@ -176,7 +176,7 @@ pub struct EfiSystemTable {
     ntable_entries: usize,
     // A pointer to the system configuration tables. The number of entries in the table is
     // NumberOfTableEntries
-    config_table: *const EfiConfigurationTable,
+    config_table: *const EfiConfigurationTableEntry,
 }
 
 // TODO: We should wrap these types intead so it is stronger typed
@@ -184,34 +184,49 @@ type EfiGuid = u128;
 
 #[derive(Debug)]
 #[repr(packed, C)]
-pub struct EfiConfigurationTable {
+pub struct EfiConfigurationTableEntry {
     // The 128-bit GUID value that uniquely identifies the system configuration table.
     pub vendor_guid: EfiGuid,
     // A pointer to the table associated with `vendor_guid`
     pub vendor_table: usize,
 }
 
+/// Reads the EfiConfigurationTable from the EfiSystemTable
 pub fn read_config_table() {
     // Get a handle to the EfiSystemTable
     let sys_table = EFI_SYSTEM_TABLE.load(Ordering::SeqCst);
 
+    // If the handle is null, just return
     if sys_table.is_null() {
         return;
     }
 
-    unsafe {
-        let config_table = (*sys_table).config_table;
-        let end_config_table = config_table as usize + (*sys_table).ntable_entries * 3 * 8;
+    // Compute the size of a single entry from the configuration table
+    let config_table_entry_size = core::mem::size_of::<EfiConfigurationTableEntry>();
 
-        let mut cur_entry = 0;
-        while cur_entry < (*sys_table).ntable_entries {
-            let entry_addr = config_table as usize + cur_entry * 3 * 8;
-            let table_entry =
-                core::ptr::read_unaligned(entry_addr as *const EfiConfigurationTable);
-            let guid = table_entry.vendor_guid;
-            crate::print!("{:x?}\n", guid);
-            cur_entry += 1;
-        }
+    // Get a handle to the configuration table
+    let config_table = unsafe { (*sys_table).config_table };
+
+    // Get the number of table entries
+    let ntable_entries = unsafe { (*sys_table).ntable_entries };
+
+    // We start at entry 0
+    let mut entry_idx = 0;
+
+    // Loop until we still have entries to parse
+    while entry_idx < ntable_entries {
+        // Compute the entry's address
+        let entry_addr = config_table as usize + entry_idx * config_table_entry_size;
+        // Read the entry and convert it to the appropriate structure
+        let table_entry = unsafe {
+            core::ptr::read_unaligned(entry_addr as *const EfiConfigurationTableEntry)
+        };
+        // Get the vendor guid
+        let guid = table_entry.vendor_guid;
+        crate::print!("{:x?}\n", guid);
+
+        // Go to the next entry
+        entry_idx += 1;
     }
 }
 

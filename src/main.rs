@@ -6,10 +6,10 @@ pub mod efi;
 pub mod print;
 mod panic;
 
-use crate::efi::{get_memory_map, initialize_system_table, exit_boot_services, EfiHandle, EfiStatus, EfiSystemTable};
+use crate::efi::{get_memory_map, initialize_system_table, EfiHandle, EfiStatus, EfiSystemTable};
 
 #[no_mangle]
-extern "C" fn efi_main(image_handle: EfiHandle, system_table: *mut EfiSystemTable) -> EfiStatus {
+extern "C" fn efi_main(_image_handle: EfiHandle, system_table: *mut EfiSystemTable) -> EfiStatus {
     initialize_system_table(system_table);
 
     let map_key = get_memory_map();

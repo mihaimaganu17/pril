@@ -37,7 +37,7 @@ impl SerialWriter {
             port,
             Ordering::SeqCst,
             Ordering::SeqCst,
-        );
+        ).unwrap();
 
         let port = SERIAL_PORT.load(Ordering::SeqCst);
 
