@@ -87,8 +87,8 @@ impl SerialWriter {
 unsafe fn outb(port: u16, value: u8) {
     asm!(
         "out dx, {value}",
-        in("dx") port,
         value = in(reg_byte) value,
+        in("dx") port,
     );
 }
 
@@ -96,8 +96,8 @@ unsafe fn inb(port: u16) -> u8 {
     let value;
     asm!(
         "in {value}, dx",
-        in("dx") port,
         value = out(reg_byte) value,
+        in("dx") port,
     );
     value
 }

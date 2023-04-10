@@ -1,9 +1,11 @@
 //! Module that acts as a central point for FFI bindings from the UEFI API
 pub mod boot_services;
 pub mod status;
+pub mod acpi;
 
 use core::sync::atomic::{AtomicPtr, Ordering};
 use boot_services::EfiBootServicesTable;
+use acpi::EFI_ACPI_20_TABLE_GUID;
 pub use boot_services::{get_memory_map, exit_boot_services};
 pub use status::*;
 
@@ -223,7 +225,11 @@ pub fn read_config_table() {
         };
         // Get the vendor guid
         let guid = table_entry.vendor_guid;
-        crate::print!("{:x?}\n", guid);
+
+        if guid == EFI_ACPI_20_TABLE_GUID {
+            crate::print!("Found ACPI 2.0 table: {:x?}\n", guid);
+            acpi::read_rsdp(table_entry.vendor_table);
+        }
 
         // Go to the next entry
         entry_idx += 1;
