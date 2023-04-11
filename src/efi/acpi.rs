@@ -109,6 +109,6 @@ pub fn read_acpi_table(addr: usize) {
     };
 
     let signature = core::str::from_utf8(&signature);
-    crate::print!("Found signature: {:?} table with length {}", signature, length);
+    crate::print!("Found signature: {:?} table with length: {}", signature, length);
 }
 
