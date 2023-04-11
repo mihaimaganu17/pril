@@ -98,12 +98,21 @@ pub struct XSDT {
     entries: [u64; MAX_ENTRIES],
 }
 
+/// Read the Extended System Description Table from `addr`, whith the specified length
+pub fn read_xsdt(addr: usize, length: usize) -> XSDT {
+    // Compute the number of entries
+    let size_of_entries = length - core::mem::size_of::<DescriptionHeader>();
+}
+
 // TODO: Parse all tables
 pub fn read_acpi_table(addr: usize) {
+    // Read the signature
     let signature = unsafe {
         core::ptr::read_unaligned(addr as *const [u8; 4])
     };
 
+    // Read the length of the table. Some of the tables have variable lengths, so we need to read
+    // this field prior to reading the table
     let length = unsafe {
         core::ptr::read_unaligned((addr + 4) as *const u32)
     };
