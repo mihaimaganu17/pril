@@ -1,5 +1,7 @@
 // TODO: Verify checksum for the RSDP structure
 // TODO: Verify ext_checksum for the RSDP structure
+use crate::print;
+use core::mem::size_of;
 
 /// GUID for the ACPI 2.0 vendor table, which is the RSDP structure, as reported by UEFI System
 /// Table
@@ -48,8 +50,8 @@ pub fn read_rsdp(addr: usize) -> RSDP {
     let oemid = core::str::from_utf8(&rsdp.oemid).unwrap();
     crate::print!("OEMID: {:?}\n", oemid);
 
-    read_acpi_table(rsdp.rsdt_addr as usize);
     read_acpi_table(rsdp.xsdt_addr as usize);
+    read_acpi_table(rsdp.rsdt_addr as usize);
 
     rsdp
 }
@@ -93,15 +95,33 @@ const MAX_ENTRIES: usize = 100;
 /// The XSDT provides identical functionality to the RSDT but accommodates physical addresses of
 /// DESCRIPTION HEADERs that are larger than 32 bits. Notice that both the XSDT and the RSDT can be
 /// pointed to by the RSDP structure. An ACPI-compatible OS must use the XSDT if present.
+#[repr(C)]
 pub struct XSDT {
+    // Header for the Table
     header: DescriptionHeader,
-    entries: [u64; MAX_ENTRIES],
+    // A list of pointers for other ACPI tables.
+    entries: &'static [u64],
 }
 
 /// Read the Extended System Description Table from `addr`, whith the specified length
-pub fn read_xsdt(addr: usize, length: usize) -> XSDT {
-    // Compute the number of entries
-    let size_of_entries = length - core::mem::size_of::<DescriptionHeader>();
+pub fn read_xsdt(addr: usize, length: usize) {
+    // First, read the XSDT Header
+    let header = unsafe {
+        core::ptr::read_unaligned(addr as *const DescriptionHeader)
+    };
+
+    let signature = core::str::from_utf8(&header.signature).unwrap();
+    print!("XSDT Sig {}\n", signature);
+
+    // Compute the number of entries followin the XSDT Table Header
+    let nentries = (header.length as usize - size_of::<DescriptionHeader>()) / size_of::<u64>();
+    print!("Number of entries {nentries}\n");
+
+    let entries = core::ptr::slice_from_raw_parts((addr + size_of::<DescriptionHeader>()) as *const u64, nentries);
+
+    for i in 0..nentries {
+        print!("Entry {i}, {:x?}\n", unsafe { &*entries });
+    }
 }
 
 // TODO: Parse all tables
@@ -117,7 +137,13 @@ pub fn read_acpi_table(addr: usize) {
         core::ptr::read_unaligned((addr + 4) as *const u32)
     };
 
-    let signature = core::str::from_utf8(&signature);
-    crate::print!("Found signature: {:?} table with length: {}", signature, length);
+    let signature = core::str::from_utf8(&signature).unwrap();
+    print!("Found signature: {:?} table with length: {}", signature, length);
+
+    // TODO: Maybe transform this match in a list? Static list with function pointers?
+    match signature {
+        "XSDT" => read_xsdt(addr, length as usize),
+        &_ => todo!(),
+    };
 }
 
