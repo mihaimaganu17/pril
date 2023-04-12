@@ -122,9 +122,9 @@ pub fn read_xsdt(addr: usize, length: usize) -> XSDT {
     // Compute the number of entries followin the XSDT Table Header
     let nentries = (header.length as usize - size_of::<DescriptionHeader>()) / size_of::<u64>();
 
-    // Since the data is not aligned, we cannot read it properly, using a
-    // `core::slice::from_raw_parts` call, so we will only save the address of the list and the
-    // number of entries
+    // Since the data for the entries in the XSDT table is not aligned,
+    // we cannot read it properly, using a `core::slice::from_raw_parts` call, so we will only save 
+    // the address of the list and the number of entries
     XSDT {
         header,
         entries: Entries {
