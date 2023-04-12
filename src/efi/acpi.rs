@@ -99,12 +99,18 @@ const MAX_ENTRIES: usize = 100;
 pub struct XSDT {
     // Header for the Table
     header: DescriptionHeader,
-    // A list of pointers for other ACPI tables.
-    entries: &'static [u64],
+    // Custom structure which holds the next address in memory after the above header and a length
+    // of how many entries does the XSDT contain
+    entries: Entries,
+}
+
+pub struct Entries {
+    addr: usize,
+    length: usize,
 }
 
 /// Read the Extended System Description Table from `addr`, whith the specified length
-pub fn read_xsdt(addr: usize, length: usize) {
+pub fn read_xsdt(addr: usize, length: usize) -> XSDT {
     // First, read the XSDT Header
     let header = unsafe {
         core::ptr::read_unaligned(addr as *const DescriptionHeader)
@@ -115,12 +121,16 @@ pub fn read_xsdt(addr: usize, length: usize) {
 
     // Compute the number of entries followin the XSDT Table Header
     let nentries = (header.length as usize - size_of::<DescriptionHeader>()) / size_of::<u64>();
-    print!("Number of entries {nentries}\n");
 
-    let entries = core::ptr::slice_from_raw_parts((addr + size_of::<DescriptionHeader>()) as *const u64, nentries);
-
-    for i in 0..nentries {
-        print!("Entry {i}, {:x?}\n", unsafe { &*entries });
+    // Since the data is not aligned, we cannot read it properly, using a
+    // `core::slice::from_raw_parts` call, so we will only save the address of the list and the
+    // number of entries
+    XSDT {
+        header,
+        entries: Entries {
+            addr: (addr + size_of::<DescriptionHeader>()),
+            length: nentries,
+        }
     }
 }
 
@@ -142,7 +152,9 @@ pub fn read_acpi_table(addr: usize) {
 
     // TODO: Maybe transform this match in a list? Static list with function pointers?
     match signature {
-        "XSDT" => read_xsdt(addr, length as usize),
+        "XSDT" => {
+            read_xsdt(addr, length as usize),
+        }
         &_ => todo!(),
     };
 }
