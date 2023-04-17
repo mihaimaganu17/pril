@@ -1,4 +1,5 @@
 #![feature(panic_info_message)]
+#![feature(strict_provenance)]
 #![no_std]
 #![no_main]
 

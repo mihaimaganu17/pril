@@ -90,70 +90,137 @@ pub struct DescriptionHeader {
     creator_revision: u32,
 }
 
+impl DescriptionHeader {
+    pub fn from_addr(addr: usize) -> Self {
+        // Check if the pointer is not NULL ?
+
+        // Read the header from the address
+        let header = unsafe {
+            core::ptr::read_unaligned(addr as *const DescriptionHeader)
+        };
+
+        header
+    }
+}
+
 const MAX_ENTRIES: usize = 100;
 
 /// The XSDT provides identical functionality to the RSDT but accommodates physical addresses of
 /// DESCRIPTION HEADERs that are larger than 32 bits. Notice that both the XSDT and the RSDT can be
 /// pointed to by the RSDP structure. An ACPI-compatible OS must use the XSDT if present.
-#[repr(C)]
+#[repr(C, packed)]
 pub struct XSDT {
     // Header for the Table
     header: DescriptionHeader,
     // Custom structure which holds the next address in memory after the above header and a length
     // of how many entries does the XSDT contain
-    entries: Entries,
+    pub entries: Entries,
 }
 
+/// The entries that are stored in the XSDT table, specified here by their address and the legnth.
 pub struct Entries {
-    addr: usize,
+    addr: u64,
     length: usize,
 }
 
-/// Read the Extended System Description Table from `addr`, whith the specified length
-pub fn read_xsdt(addr: usize, length: usize) -> XSDT {
-    // First, read the XSDT Header
-    let header = unsafe {
-        core::ptr::read_unaligned(addr as *const DescriptionHeader)
-    };
+impl IntoIterator for Entries {
+    type Item = u64;
+    type IntoIter = EntriesIterator;
 
-    let signature = core::str::from_utf8(&header.signature).unwrap();
-    print!("XSDT Sig {}\n", signature);
-
-    // Compute the number of entries followin the XSDT Table Header
-    let nentries = (header.length as usize - size_of::<DescriptionHeader>()) / size_of::<u64>();
-
-    // Since the data for the entries in the XSDT table is not aligned,
-    // we cannot read it properly, using a `core::slice::from_raw_parts` call, so we will only save 
-    // the address of the list and the number of entries
-    XSDT {
-        header,
-        entries: Entries {
-            addr: (addr + size_of::<DescriptionHeader>()),
-            length: nentries,
+    fn into_iter() -> Self::IntoIter {
+        EntriesIterator {
+            entries: self,
+            idx: 0,
         }
     }
 }
 
-// TODO: Parse all tables
+/// An Iterator struct used to iterate over the records in Entries
+pub struct EntriesIterator {
+    entries: Entries,
+    idx: usize,
+}
+
+impl Iterator for EntriesIterator {
+    type Item = u64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Compute the current element's address
+        let elem_addr = self.entries.addr as usize + size_of::<Self::Item>() * self.idx;
+
+        print!("Element address: {:x?}", elem_addr);
+
+        // If there isn't enough data to read one more element, return None
+        if elem_addr >= self.entries.addr as usize + self.entries.length - (size_of::<Self::Item>() + 1) {
+            return None;
+        }
+
+        // Read the element
+        let table_addr = unsafe { core::ptr::read_unaligned(elem_addr as *const u64) };
+
+        // Go to the next element for the next iteration
+        self.idx += 1;
+
+        // Return the element
+        Some(table_addr)
+    }
+}
+
+// The signature found in the first 4 bytes from the XSDT table
+const XSDT_SIGNATURE: &[u8; 4] = b"XSDT";
+
+impl XSDT {
+    /// Read the Extended System Description Table from `addr`, whith the specified length
+    pub fn from_header(header: DescriptionHeader) -> Option<XSDT> {
+        // Get the address of the `header` received as input
+        let header_addr = header.signature.as_ptr().addr();
+
+        // If the header's signature is no the right signature, we return `None`
+        if &header.signature != XSDT_SIGNATURE {
+            return None;
+        }
+
+        // Compute the number of entries followin the XSDT Table Header
+        let nentries = (header.length as usize - size_of::<DescriptionHeader>()) / size_of::<u64>();
+
+        // Since the data for the entries in the XSDT table is not aligned, we cannot read it
+        // properly, using a `core::slice::from_raw_parts` call, so we will only save the address
+        // of the list and the number of entries
+        let xsdt = XSDT {
+            header,
+            entries: Entries {
+                addr: (header_addr + size_of::<DescriptionHeader>()) as u64,
+                length: nentries,
+                idx: 0,
+            }
+        };
+
+        Some(xsdt)
+    }
+}
+
+/// Reads an ACPI table
 pub fn read_acpi_table(addr: usize) {
-    // Read the signature
-    let signature = unsafe {
-        core::ptr::read_unaligned(addr as *const [u8; 4])
-    };
+    // Read the table's header
+    let header = DescriptionHeader::from_addr(addr);
 
-    // Read the length of the table. Some of the tables have variable lengths, so we need to read
-    // this field prior to reading the table
-    let length = unsafe {
-        core::ptr::read_unaligned((addr + 4) as *const u32)
-    };
-
-    let signature = core::str::from_utf8(&signature).unwrap();
-    print!("Found signature: {:?} table with length: {}", signature, length);
+    // Convert the signature into a `str` if possible
+    let signature = core::str::from_utf8(&header.signature).unwrap();
+    // Copy the length into a variable, because Rust cannot use it, as it was unaligned.
+    let length = header.length;
+    print!("Found signature: {:?} table with length: {}\n", signature, length);
 
     // TODO: Maybe transform this match in a list? Static list with function pointers?
     match signature {
         "XSDT" => {
-            read_xsdt(addr, length as usize),
+            let maybe_xsdt = XSDT::from_header(header);
+
+            if let Some(xsdt) = maybe_xsdt {
+                // Now that we got the XSDT, we can read the other tables, it refers to
+                for table_addr in xsdt.entries.iter() {
+                    print!("Table at addr: {:x?}\n", table_addr);
+                }
+            }
         }
         &_ => todo!(),
     };
