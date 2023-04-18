@@ -1,7 +1,14 @@
 // TODO: Verify checksum for the RSDP structure
 // TODO: Verify ext_checksum for the RSDP structure
+mod header;
+mod xsdt;
+mod madt;
+
 use crate::print;
 use core::mem::size_of;
+pub use header::DescriptionHeader;
+pub use xsdt::XSDT;
+pub use madt::MADT;
 
 /// GUID for the ACPI 2.0 vendor table, which is the RSDP structure, as reported by UEFI System
 /// Table
@@ -55,154 +62,6 @@ pub fn read_rsdp(addr: usize) -> RSDP {
     rsdp
 }
 
-/// All system description tables begin with the structure below, `DescriptionHeader`
-/// The `signature` field determines the content of the system description table.
-#[derive(Debug)]
-#[repr(C, packed)]
-pub struct DescriptionHeader {
-    /// The ASCII string representation of the table identifier. Notice that if OSPM finds a
-    /// signature in a table that is not listed in Table 5-29(ACPI spec, page 120),
-    /// OSPM ignores the entire table (it is not loaded into ACPI namespace); OSPM ignores the
-    /// table even though the values in the Length and Checksum fields are correct.
-    signature: [u8; 4],
-    /// The length of the table, in bytes, including the header, starting from offset 0. This field
-    /// is used to record the size of the entire table.
-    length: u32,
-    /// The revision of the structure corresponding to the signature field for this table. Larger
-    /// revision numbers are backward compatible to lower revision numbers with the same signature.
-    revision: u8,
-    /// The entire table, including the checksum field, must add to zero to be considered valid.
-    checksum: u8,
-    /// An OEM-supplied string that identifies the OEM.
-    oemid: [u8; 6],
-    /// An OEM-supplied string that the OEM uses to identify the particular data table. This field
-    /// is particularly useful when defining a definition block to distinguish definition block
-    /// functions. The OEM assigns each dissimilar table a new OEM Table ID.
-    oem_table_id: [u8; 8],
-    /// An OEM-supplied revision number. Larger numbers are assumed to be newer revisions.
-    oem_revision: u32,
-    /// Vendor ID of utility that created the table. For tables containing Definition Blocks, this
-    /// is the ID for the ASL Compiler.
-    creator_id: u32,
-    /// Revision of utility that created the table. For tables containing Definition Blocks, this
-    /// is the revision for the ASL Compiler.
-    creator_revision: u32,
-}
-
-impl DescriptionHeader {
-    pub fn from_addr(addr: usize) -> Self {
-        // Check if the pointer is not NULL ?
-
-        // Read the header from the address
-        let header = unsafe {
-            core::ptr::read_unaligned(addr as *const DescriptionHeader)
-        };
-
-        header
-    }
-}
-
-const MAX_ENTRIES: usize = 100;
-
-/// The XSDT provides identical functionality to the RSDT but accommodates physical addresses of
-/// DESCRIPTION HEADERs that are larger than 32 bits. Notice that both the XSDT and the RSDT can be
-/// pointed to by the RSDP structure. An ACPI-compatible OS must use the XSDT if present.
-#[repr(C, packed)]
-pub struct XSDT {
-    // Header for the Table
-    header: DescriptionHeader,
-    // Custom structure which holds the next address in memory after the above header and how many
-    // entries does the XSDT contain
-    pub entries: Entries,
-}
-
-/// The entries that are stored in the XSDT table, specified here by their address and their
-/// cardinal.
-pub struct Entries {
-    addr: u64,
-    nentries: usize,
-}
-
-impl IntoIterator for Entries {
-    type Item = u64;
-    type IntoIter = EntriesIterator;
-
-    fn into_iter(self) -> Self::IntoIter {
-        EntriesIterator {
-            entries: self,
-            idx: 0,
-        }
-    }
-}
-
-/// An Iterator struct used to iterate over the records in Entries
-pub struct EntriesIterator {
-    entries: Entries,
-    idx: usize,
-}
-
-impl Iterator for EntriesIterator {
-    type Item = u64;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // If there isn't enough data to read one more element, return None
-        if self.idx >= self.entries.nentries {
-            return None;
-        }
-
-        // Compute the current element's address
-        let elem_addr = self.entries.addr as usize + size_of::<Self::Item>() * self.idx;
-
-        // Read the element
-        let table_addr = unsafe { core::ptr::read_unaligned(elem_addr as *const u64) };
-
-        // Go to the next element for the next iteration
-        self.idx += 1;
-
-        // Return the element
-        Some(table_addr)
-    }
-}
-
-// The signature found in the first 4 bytes from the XSDT table
-const XSDT_SIGNATURE: &[u8; 4] = b"XSDT";
-
-impl XSDT {
-    /// Read the Extended System Description Table from `addr`, whith the specified length.
-    /// We also have to pass the original Physical Address from where the Header was read from,
-    /// as we have to compute the start address for the entries that follow
-    pub fn from_header(addr: usize, header: DescriptionHeader) -> Option<XSDT> {
-        // If the header's signature is no the right signature, we return `None`
-        if &header.signature != XSDT_SIGNATURE {
-            return None;
-        }
-
-        // Compute the number of entries followin the XSDT Table Header
-        let nentries = (header.length as usize - size_of::<DescriptionHeader>()) / size_of::<u64>();
-
-        // Since the data for the entries in the XSDT table is not aligned, we cannot read it
-        // properly, using a `core::slice::from_raw_parts` call, so we will only save the address
-        // of the list and the number of entries
-        let xsdt = XSDT {
-            header,
-            entries: Entries {
-                addr: (addr + size_of::<DescriptionHeader>()) as u64,
-                nentries: nentries,
-            }
-        };
-
-        Some(xsdt)
-    }
-}
-
-/// Multiple APIC Description Table.
-#[derive(Debug)]
-#[repr(C, packed)]
-struct MADT {
-    header: DescriptionHeader,
-    
-}
-
 /// Reads an ACPI table
 pub fn read_acpi_table(addr: usize) {
     // Read the table's header
@@ -229,6 +88,10 @@ pub fn read_acpi_table(addr: usize) {
         "FACP" => {
             // This is the Fixed ACPI Description Table (FADT) and it is way to fucking long to be
             // parsed at this moment. Please come back
+        }
+        "APIC" => {
+            // This is the Multiple APIC Description Table
+            let maybe_madt = MADT::from_header(addr, header);
         }
         &_ => {
             print!("Parsing for table {:?} at addr {:x?} not yet implemented!!!\n",
