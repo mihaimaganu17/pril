@@ -48,7 +48,6 @@ pub fn read_rsdp(addr: usize) -> RSDP {
     assert!("RSD PTR " == signature);
 
     let oemid = core::str::from_utf8(&rsdp.oemid).unwrap();
-    crate::print!("OEMID: {:?}\n", oemid);
 
     read_acpi_table(rsdp.xsdt_addr as usize);
     read_acpi_table(rsdp.rsdt_addr as usize);
@@ -112,22 +111,23 @@ const MAX_ENTRIES: usize = 100;
 pub struct XSDT {
     // Header for the Table
     header: DescriptionHeader,
-    // Custom structure which holds the next address in memory after the above header and a length
-    // of how many entries does the XSDT contain
+    // Custom structure which holds the next address in memory after the above header and how many
+    // entries does the XSDT contain
     pub entries: Entries,
 }
 
-/// The entries that are stored in the XSDT table, specified here by their address and the legnth.
+/// The entries that are stored in the XSDT table, specified here by their address and their
+/// cardinal.
 pub struct Entries {
     addr: u64,
-    length: usize,
+    nentries: usize,
 }
 
 impl IntoIterator for Entries {
     type Item = u64;
     type IntoIter = EntriesIterator;
 
-    fn into_iter() -> Self::IntoIter {
+    fn into_iter(self) -> Self::IntoIter {
         EntriesIterator {
             entries: self,
             idx: 0,
@@ -145,15 +145,13 @@ impl Iterator for EntriesIterator {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Compute the current element's address
-        let elem_addr = self.entries.addr as usize + size_of::<Self::Item>() * self.idx;
-
-        print!("Element address: {:x?}", elem_addr);
-
         // If there isn't enough data to read one more element, return None
-        if elem_addr >= self.entries.addr as usize + self.entries.length - (size_of::<Self::Item>() + 1) {
+        if self.idx >= self.entries.nentries {
             return None;
         }
+
+        // Compute the current element's address
+        let elem_addr = self.entries.addr as usize + size_of::<Self::Item>() * self.idx;
 
         // Read the element
         let table_addr = unsafe { core::ptr::read_unaligned(elem_addr as *const u64) };
@@ -170,11 +168,10 @@ impl Iterator for EntriesIterator {
 const XSDT_SIGNATURE: &[u8; 4] = b"XSDT";
 
 impl XSDT {
-    /// Read the Extended System Description Table from `addr`, whith the specified length
-    pub fn from_header(header: DescriptionHeader) -> Option<XSDT> {
-        // Get the address of the `header` received as input
-        let header_addr = header.signature.as_ptr().addr();
-
+    /// Read the Extended System Description Table from `addr`, whith the specified length.
+    /// We also have to pass the original Physical Address from where the Header was read from,
+    /// as we have to compute the start address for the entries that follow
+    pub fn from_header(addr: usize, header: DescriptionHeader) -> Option<XSDT> {
         // If the header's signature is no the right signature, we return `None`
         if &header.signature != XSDT_SIGNATURE {
             return None;
@@ -189,14 +186,21 @@ impl XSDT {
         let xsdt = XSDT {
             header,
             entries: Entries {
-                addr: (header_addr + size_of::<DescriptionHeader>()) as u64,
-                length: nentries,
-                idx: 0,
+                addr: (addr + size_of::<DescriptionHeader>()) as u64,
+                nentries: nentries,
             }
         };
 
         Some(xsdt)
     }
+}
+
+/// Multiple APIC Description Table.
+#[derive(Debug)]
+#[repr(C, packed)]
+struct MADT {
+    header: DescriptionHeader,
+    
 }
 
 /// Reads an ACPI table
@@ -213,16 +217,26 @@ pub fn read_acpi_table(addr: usize) {
     // TODO: Maybe transform this match in a list? Static list with function pointers?
     match signature {
         "XSDT" => {
-            let maybe_xsdt = XSDT::from_header(header);
+            let maybe_xsdt = XSDT::from_header(addr, header);
 
             if let Some(xsdt) = maybe_xsdt {
                 // Now that we got the XSDT, we can read the other tables, it refers to
-                for table_addr in xsdt.entries.iter() {
-                    print!("Table at addr: {:x?}\n", table_addr);
+                for table_addr in xsdt.entries.into_iter() {
+                    read_acpi_table(table_addr as usize);
                 }
             }
         }
-        &_ => todo!(),
+        "FACP" => {
+            // This is the Fixed ACPI Description Table (FADT) and it is way to fucking long to be
+            // parsed at this moment. Please come back
+        }
+        &_ => {
+            print!("Parsing for table {:?} at addr {:x?} not yet implemented!!!\n",
+                signature,
+                addr
+            );
+            todo!();
+        }
     };
 }
 
