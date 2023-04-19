@@ -37,9 +37,7 @@ impl DescriptionHeader {
         // Check if the pointer is not NULL ?
 
         // Read the header from the address
-        let header = unsafe {
-            core::ptr::read_unaligned(addr as *const DescriptionHeader)
-        };
+        let header = unsafe { core::ptr::read_unaligned(addr as *const DescriptionHeader) };
 
         header
     }

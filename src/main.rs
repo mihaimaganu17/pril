@@ -4,8 +4,8 @@
 #![no_main]
 
 pub mod efi;
-pub mod print;
 mod panic;
+pub mod print;
 
 use crate::efi::{get_memory_map, initialize_system_table, EfiHandle, EfiStatus, EfiSystemTable};
 
@@ -19,7 +19,7 @@ extern "C" fn efi_main(_image_handle: EfiHandle, system_table: *mut EfiSystemTab
 
     crate::efi::read_config_table();
 
-    print!("This is a formatted string {:?}!!!\n", 2+2);
+    print!("This is a formatted string {:?}!!!\n", 2 + 2);
 
     //exit_boot_services(image_handle, map_key);
     panic!("Pril finished running\n");

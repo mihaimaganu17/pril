@@ -1,12 +1,12 @@
 //! Module that acts as a central point for FFI bindings from the UEFI API
+pub mod acpi;
 pub mod boot_services;
 pub mod status;
-pub mod acpi;
 
-use core::sync::atomic::{AtomicPtr, Ordering};
-use boot_services::EfiBootServicesTable;
 use acpi::EFI_ACPI_20_TABLE_GUID;
-pub use boot_services::{get_memory_map, exit_boot_services};
+use boot_services::EfiBootServicesTable;
+pub use boot_services::{exit_boot_services, get_memory_map};
+use core::sync::atomic::{AtomicPtr, Ordering};
 pub use status::*;
 
 // Signature, that resides as the first field in the UEFI System Table. We check this to make sure
@@ -220,9 +220,8 @@ pub fn read_config_table() {
         // Compute the entry's address
         let entry_addr = config_table as usize + entry_idx * config_table_entry_size;
         // Read the entry and convert it to the appropriate structure
-        let table_entry = unsafe {
-            core::ptr::read_unaligned(entry_addr as *const EfiConfigurationTableEntry)
-        };
+        let table_entry =
+            unsafe { core::ptr::read_unaligned(entry_addr as *const EfiConfigurationTableEntry) };
         // Get the vendor guid
         let guid = table_entry.vendor_guid;
 

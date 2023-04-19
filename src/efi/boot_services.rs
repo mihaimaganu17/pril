@@ -1,6 +1,9 @@
 //! Module that handles all of the EFI Boot Services table functions
+use crate::{
+    efi::{status, EfiTableHeader, EFI_SYSTEM_TABLE},
+    print, EfiHandle, EfiStatus,
+};
 use bitflags::bitflags;
-use crate::{EfiHandle, EfiStatus, print, efi::{status, EFI_SYSTEM_TABLE, EfiTableHeader}};
 use core::sync::atomic::Ordering;
 
 /// Signature for the `EfiBootServicesTable` structure
@@ -123,7 +126,8 @@ pub const MEMORY_MAP_BUFFER_SIZE: usize = 8 * 1024;
 /// number associated with the `EfiMemoryDescriptor`.
 ///
 /// This function returns the map key obtained from a `get_memory_map` call
-pub fn get_memory_map()->usize {//image_handle: EfiHandle) -> usize {
+pub fn get_memory_map() -> usize {
+    //image_handle: EfiHandle) -> usize {
     // Get a hold of the global EFI System Table
     let sys_table = EFI_SYSTEM_TABLE.load(Ordering::SeqCst);
 
@@ -140,20 +144,25 @@ pub fn get_memory_map()->usize {//image_handle: EfiHandle) -> usize {
     let mut descriptor_size: usize = 0;
     let mut descriptor_version: u32 = 0;
 
-    let status = unsafe {((*boot_services_table).get_memory_map)(
-        &mut memory_map_size,
-        memory_map.as_mut_ptr(),
-        &mut map_key,
-        &mut descriptor_size,
-        &mut descriptor_version,
-    )};
+    let status = unsafe {
+        ((*boot_services_table).get_memory_map)(
+            &mut memory_map_size,
+            memory_map.as_mut_ptr(),
+            &mut map_key,
+            &mut descriptor_size,
+            &mut descriptor_version,
+        )
+    };
 
     // Printing affects the memory map, and the map key will change. However, if our status
     // is not successful we want to know about it
     match status {
         status::EFI_BUFFER_TOO_SMALL => {
             // The memory map buffer was too small
-            print!("Memory map size is too small! Retrying with size: {}\n", memory_map_size);
+            print!(
+                "Memory map size is too small! Retrying with size: {}\n",
+                memory_map_size
+            );
             // If we cannot obtain a memory map the second time, just panic
             if status != status::EFI_SUCCESS {
                 panic!("Cannot get the memory map, even with the right size\n");
@@ -167,13 +176,16 @@ pub fn get_memory_map()->usize {//image_handle: EfiHandle) -> usize {
         status::EFI_SUCCESS => {
             //print!("Successfully got a memory map!\n");
         }
-        _ => { panic!("Unknown get memory map status code {}", status); }
+        _ => {
+            panic!("Unknown get memory map status code {}", status);
+        }
     };
 
     for idx in (0..memory_map_size).step_by(descriptor_size) {
         let entry = unsafe {
             core::ptr::read_unaligned(
-                memory_map.get(idx..).unwrap().as_ptr()  as *const EfiMemoryDescriptor)
+                memory_map.get(idx..).unwrap().as_ptr() as *const EfiMemoryDescriptor
+            )
         };
 
         let _mem_type: EfiMemoryType = entry.mem_type.into();
@@ -226,7 +238,7 @@ pub struct EfiMemoryDescriptor {
     number_pages: u64,
     // Attributes of the memory region that describe the bit mask capabilities for that memory
     // region and not necessarily the current settings for that memory region.
-    attr_mask: u64,//EfiMemoryAttributes,
+    attr_mask: u64, //EfiMemoryAttributes,
 }
 
 impl From<u32> for EfiMemoryType {
@@ -407,5 +419,3 @@ bitflags! {
         const MORE_RELIABLE = 0x0000_0000_0001_0000;
     }
 }
-
-
