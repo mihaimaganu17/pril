@@ -1,13 +1,16 @@
 //! Module that acts as a central point for FFI bindings from the UEFI API
 pub mod acpi;
 pub mod boot_services;
+pub mod malloc;
 pub mod status;
 
+pub use boot_services::exit_boot_services;
+pub use status::*;
+pub use malloc::get_memory_map;
 use acpi::EFI_ACPI_20_TABLE_GUID;
 use boot_services::EfiBootServicesTable;
-pub use boot_services::{exit_boot_services, get_memory_map};
 use core::sync::atomic::{AtomicPtr, Ordering};
-pub use status::*;
+use crate::print;
 
 // Signature, that resides as the first field in the UEFI System Table. We check this to make sure
 // we actually are in an UEFI system
@@ -200,8 +203,10 @@ pub fn read_config_table() {
 
     // If the handle is null, just return
     if sys_table.is_null() {
+        //print!("Is Null\n");
         return;
     }
+    print!("Is Not Null!\n");
 
     // Compute the size of a single entry from the configuration table
     let config_table_entry_size = core::mem::size_of::<EfiConfigurationTableEntry>();

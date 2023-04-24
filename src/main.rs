@@ -15,6 +15,8 @@ extern "C" fn efi_main(_image_handle: EfiHandle, system_table: *mut EfiSystemTab
 
     let map_key = get_memory_map();
 
+
+    print!("Map key {map_key}\n");
     assert!(map_key != 0);
 
     crate::efi::read_config_table();
