@@ -7,22 +7,19 @@ pub mod efi;
 mod panic;
 pub mod print;
 
-use crate::efi::{get_memory_map, initialize_system_table, EfiHandle, EfiStatus, EfiSystemTable};
+use crate::efi::{initialize_system_table, EfiHandle, EfiStatus, EfiSystemTable};
+use crate::efi::malloc::EfiMemoryManager;
 
 #[no_mangle]
 extern "C" fn efi_main(_image_handle: EfiHandle, system_table: *mut EfiSystemTable) -> EfiStatus {
     initialize_system_table(system_table);
 
-    let map_key = get_memory_map();
+    let mut mem_manager =  EfiMemoryManager::new();
+    let map_key = mem_manager.get_memory_map();
 
+    let total_avlbl_mem = mem_manager.free_mem_after_exit_bs();
 
-    print!("Map key {map_key}\n");
-    assert!(map_key != 0);
+    print!("Total available memory {}!!!\n", total_avlbl_mem);
 
-    crate::efi::read_config_table();
-
-    print!("This is a formatted string {:?}!!!\n", 2 + 2);
-
-    //exit_boot_services(image_handle, map_key);
-    panic!("Pril finished running\n");
+    loop {}
 }

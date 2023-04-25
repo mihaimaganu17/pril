@@ -23,6 +23,9 @@ pub const MEMORY_MAP_BUFFER_SIZE: usize = 8 * 1024;
 /// This is the maximum number of entries we can have reported by the EFI GetMemoryMap
 pub const MAX_MEMORY_MAP_ENTRIES: usize = 1000;
 
+/// This is the defaul UEFI page size
+pub const EFI_PAGE_SIZE: usize = 4 * 1024;
+
 pub struct EfiMemoryManager {
     memory_pool: [Option<EfiMemoryDescriptor>; MAX_MEMORY_MAP_ENTRIES],
 }
@@ -36,90 +39,116 @@ impl EfiMemoryManager {
             memory_pool: [INIT_MEMORY_POOL; MAX_MEMORY_MAP_ENTRIES],
         }
     }
-}
 
-/// Returns the current boot services memory map and memory map key where
-/// - `memory_map_size` is a pointer to the size, in bytes, of the `memory_map` buffer.
-/// On input, this is the size of the buffer allocated by the caller.
-/// On output, it is the size of the buffer returned by the firmware if the buffer was large
-/// enough, or the size of the buffer needed to contain the map if the buffer was too small.
-/// - `memory_map` is a pointer to the buffer in which firmware places the current memory map.
-/// The map is an array of `EfiMemoryDescriptor`s
-/// - `map_key` is a pointer to the location in which firmware returns the key for the current
-/// memory map.
-/// - `descriptor_size` is a pointer to the location in which firmware returns the size, in
-/// bytes, of an individual `EfiMemoryDescriptor`.
-/// - `descriptor_version` is a pointer to the location in which firmware returns the version
-/// number associated with the `EfiMemoryDescriptor`.
-///
-/// This function returns the map key obtained from a `get_memory_map` call
-pub fn get_memory_map() -> usize {
-    //image_handle: EfiHandle) -> usize {
-    // Get a hold of the global EFI System Table
-    let sys_table = EFI_SYSTEM_TABLE.load(Ordering::SeqCst);
+    /// Returns the current boot services memory map and memory map key where
+    /// - `memory_map_size` is a pointer to the size, in bytes, of the `memory_map` buffer.
+    /// On input, this is the size of the buffer allocated by the caller.
+    /// On output, it is the size of the buffer returned by the firmware if the buffer was large
+    /// enough, or the size of the buffer needed to contain the map if the buffer was too small.
+    /// - `memory_map` is a pointer to the buffer in which firmware places the current memory map.
+    /// The map is an array of `EfiMemoryDescriptor`s
+    /// - `map_key` is a pointer to the location in which firmware returns the key for the current
+    /// memory map.
+    /// - `descriptor_size` is a pointer to the location in which firmware returns the size, in
+    /// bytes, of an individual `EfiMemoryDescriptor`.
+    /// - `descriptor_version` is a pointer to the location in which firmware returns the version
+    /// number associated with the `EfiMemoryDescriptor`.
+    ///
+    /// This function returns the map key obtained from a `get_memory_map` call
+    pub fn get_memory_map(&mut self) -> usize {
+        // Get a hold of the global EFI System Table
+        let sys_table = EFI_SYSTEM_TABLE.load(Ordering::SeqCst);
 
-    // Check if it is a valid pointer
-    if sys_table.is_null() {
-        return 0;
-    }
-
-    // Get a reference to the boot services table
-    let boot_services_table = unsafe { (*sys_table).boot_services };
-    let mut memory_map_size: usize = MEMORY_MAP_BUFFER_SIZE;
-    let mut memory_map = [0u8; MEMORY_MAP_BUFFER_SIZE];
-    let mut map_key: usize = 0;
-    let mut descriptor_size: usize = 0;
-    let mut descriptor_version: u32 = 0;
-
-    let status = unsafe {
-        ((*boot_services_table).get_memory_map)(
-            &mut memory_map_size,
-            memory_map.as_mut_ptr(),
-            &mut map_key,
-            &mut descriptor_size,
-            &mut descriptor_version,
-        )
-    };
-
-    // Printing affects the memory map, and the map key will change. However, if our status
-    // is not successful we want to know about it
-    match status {
-        status::EFI_BUFFER_TOO_SMALL => {
-            // The memory map buffer was too small
-            print!(
-                "Memory map size is too small! Retrying with size: {}\n",
-                memory_map_size
-            );
-            // If we cannot obtain a memory map the second time, just panic
-            if status != status::EFI_SUCCESS {
-                panic!("Cannot get the memory map, even with the right size\n");
-            }
+        // Check if it is a valid pointer
+        if sys_table.is_null() {
+            return 0;
         }
-        status::EFI_INVALID_PARAMETER => {
-            // The memory_map buffer is NULL. This should be impossible and we will panic if this
-            // is the case
-            panic!("Memory map buffer is NULL\n");
-        }
-        status::EFI_SUCCESS => {
-            //print!("Successfully got a memory map!\n");
-        }
-        _ => {
-            panic!("Unknown get memory map status code {}", status);
-        }
-    };
 
-    for (idx, offset) in (0..memory_map_size).step_by(descriptor_size).enumerate() {
-        let entry = unsafe {
-            core::ptr::read_unaligned(
-                memory_map.get(offset..).unwrap().as_ptr() as *const EfiMemoryDescriptor
+        // Get a reference to the boot services table
+        let boot_services_table = unsafe { (*sys_table).boot_services };
+        let mut memory_map_size: usize = MEMORY_MAP_BUFFER_SIZE;
+        let mut memory_map = [0u8; MEMORY_MAP_BUFFER_SIZE];
+        let mut map_key: usize = 0;
+        let mut descriptor_size: usize = 0;
+        let mut descriptor_version: u32 = 0;
+
+        let status = unsafe {
+            ((*boot_services_table).get_memory_map)(
+                &mut memory_map_size,
+                memory_map.as_mut_ptr(),
+                &mut map_key,
+                &mut descriptor_size,
+                &mut descriptor_version,
             )
         };
 
-        //print!("{idx}\n");//.{entry:#x?}\n");
+        // Printing affects the memory map, and the map key will change. However, if our status
+        // is not successful we want to know about it
+        match status {
+            status::EFI_BUFFER_TOO_SMALL => {
+                // The memory map buffer was too small
+                print!(
+                    "Memory map size is too small! Retrying with size: {}\n",
+                    memory_map_size
+                );
+                // If we cannot obtain a memory map the second time, just panic
+                if status != status::EFI_SUCCESS {
+                    panic!("Cannot get the memory map, even with the right size\n");
+                }
+            }
+            status::EFI_INVALID_PARAMETER => {
+                // The memory_map buffer is NULL. This should be impossible and we will panic if this
+                // is the case
+                panic!("Memory map buffer is NULL\n");
+            }
+            status::EFI_SUCCESS => {
+                //print!("Successfully got a memory map!\n");
+            }
+            _ => {
+                panic!("Unknown get memory map status code {}", status);
+            }
+        };
+
+        for (idx, offset) in (0..memory_map_size).step_by(descriptor_size).enumerate() {
+            let entry = unsafe {
+                core::ptr::read_unaligned(
+                    memory_map.get(offset..).unwrap().as_ptr() as *const EfiMemoryDescriptor
+                )
+            };
+
+            self.memory_pool[idx] = Some(entry);
+        }
+
+        map_key
     }
 
-    map_key
+    /// Reports the free memory after exiting the boot services
+    pub fn free_mem_after_exit_bs(&self) -> u64 {
+        // Initialize the total available memory
+        let mut total_avlbl_mem = 0;
+        for maybe_entry in &self.memory_pool {
+            if let Some(entry) = maybe_entry {
+                match entry.mem_type {
+                    EfiMemoryType::BootServicesCode
+                    | EfiMemoryType::BootServicesData
+                    | EfiMemoryType::ConventionalMemory
+                    | EfiMemoryType::PersistentMemory
+                    | EfiMemoryType::LoaderCode
+                    | EfiMemoryType::LoaderData => {
+                        // Compute the total available memory
+                        total_avlbl_mem += entry.number_pages * EFI_PAGE_SIZE as u64;
+                    } 
+                    _ => {}
+                }
+            }
+        }
+
+        total_avlbl_mem
+    }
 }
+
+
+
 
 // Type that represents a UEFI Physical Address
 type EfiPhysicalAddress = u64;
@@ -131,10 +160,10 @@ const _EFI_MEMORY_DESCRIPTOR_VERSION: u8 = 1;
 
 /// Structure that describes a single memory map entry from `EfiBootServicesTable` memory map
 #[derive(Debug)]
-#[repr(packed, C)]
+#[repr(C)]
 pub struct EfiMemoryDescriptor {
     // Type of the memory region
-    mem_type: u32,//EfiMemoryType,
+    mem_type: EfiMemoryType,
     // Physical start regions, which must be aligned on a 4KiB boundary and must not be
     // above 0xffff_ffff_ffff_f000
     phys_start: EfiPhysicalAddress,
@@ -177,7 +206,7 @@ impl From<u32> for EfiMemoryType {
 /// Each memory type has one purpose BEFORE exiting Boot Services and another one after exiting
 /// Boot Services
 #[derive(Debug, Clone, Copy)]
-#[repr(C)]
+#[repr(u32)]
 pub enum EfiMemoryType {
     /// Before exiting Boot Sevices
     /// Not usable.
@@ -326,5 +355,14 @@ bitflags! {
         // The memory region provides higher reliability relative to other memory in the system.
         // If all memory has the same reliability, then this bit is not used.
         const MORE_RELIABLE = 0x0000_0000_0001_0000;
+
+        // Physical memory protection attribute: The memory region
+        // supports making this memory range read-only by system
+        // hardware.
+        const MEMORY_RO = 0x0000000000020000;
+        // Runtime memory attribute: The memory region needs to
+        // be given a virtual mapping by the operating system when
+        // SetVirtualAddressMap() is called
+        const MEMORY_RUNTIME = 0x8000000000000000;
     }
 }

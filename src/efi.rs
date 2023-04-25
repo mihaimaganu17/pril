@@ -6,7 +6,6 @@ pub mod status;
 
 pub use boot_services::exit_boot_services;
 pub use status::*;
-pub use malloc::get_memory_map;
 use acpi::EFI_ACPI_20_TABLE_GUID;
 use boot_services::EfiBootServicesTable;
 use core::sync::atomic::{AtomicPtr, Ordering};
