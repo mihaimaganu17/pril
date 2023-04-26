@@ -1,6 +1,6 @@
 //! Module that holds the print macro
-use core::arch::asm;
 use core::sync::atomic::{AtomicPtr, Ordering};
+use crate::cpu::{inb, outb};
 
 // Dummy writer we can implement `Write` trait on, so that we can support formatted strings
 pub struct ConsoleOutWriter;
@@ -86,24 +86,6 @@ impl SerialWriter {
             outb(*port, byte);
         }
     }
-}
-
-unsafe fn outb(port: u16, value: u8) {
-    asm!(
-        "out dx, {value}",
-        value = in(reg_byte) value,
-        in("dx") port,
-    );
-}
-
-unsafe fn inb(port: u16) -> u8 {
-    let value;
-    asm!(
-        "in {value}, dx",
-        value = out(reg_byte) value,
-        in("dx") port,
-    );
-    value
 }
 
 #[macro_export]
