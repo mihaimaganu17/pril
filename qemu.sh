@@ -1,4 +1,7 @@
 qemu-system-x86_64 \
+    -smp 8 \
+    -enable-kvm \
+    -cpu host \
     -m 128 \
     -nographic \
     -bios bios/OVMF.fd \

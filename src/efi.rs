@@ -1,5 +1,15 @@
 //! Module that acts as a central point for FFI bindings from the UEFI API
+pub mod acpi;
+pub mod boot_services;
+pub mod malloc;
+pub mod status;
+
+pub use boot_services::exit_boot_services;
+pub use status::*;
+use acpi::EFI_ACPI_20_TABLE_GUID;
+use boot_services::EfiBootServicesTable;
 use core::sync::atomic::{AtomicPtr, Ordering};
+use crate::print;
 
 // Signature, that resides as the first field in the UEFI System Table. We check this to make sure
 // we actually are in an UEFI system
@@ -89,6 +99,7 @@ pub fn uefi_print(input: &str) {
 }
 
 /// Data structure that precedes all of the standard EFI table types.
+#[derive(Debug)]
 #[repr(C)]
 pub struct EfiTableHeader {
     // A 64-bit signature that identifies the type of table that follows. Unique signatures have
@@ -163,14 +174,69 @@ pub struct EfiSystemTable {
     _std_err: usize,
     // A pointer to the EFI Runtime Services Table.
     _runtime_services: usize,
-    // A pointer to the EFI Boot Services Table. See
-    // ref:efi-boot-services-table_efi_system_table.
-    _boot_services: usize,
+    // A pointer to the EFI Boot Services Table.
+    boot_services: *const EfiBootServicesTable,
     // The number of system configuration tables in the buffer ConfigurationTable.
-    _ntable_entries: usize,
+    ntable_entries: usize,
     // A pointer to the system configuration tables. The number of entries in the table is
     // NumberOfTableEntries
-    _config_table: usize,
+    config_table: *const EfiConfigurationTableEntry,
+}
+
+// TODO: We should wrap these types intead so it is stronger typed
+type EfiGuid = u128;
+
+#[derive(Debug)]
+#[repr(packed, C)]
+pub struct EfiConfigurationTableEntry {
+    // The 128-bit GUID value that uniquely identifies the system configuration table.
+    pub vendor_guid: EfiGuid,
+    // A pointer to the table associated with `vendor_guid`
+    pub vendor_table: usize,
+}
+
+/// Reads the EfiConfigurationTable from the EfiSystemTable
+pub fn read_config_table() {
+    // Get a handle to the EfiSystemTable
+    let sys_table = EFI_SYSTEM_TABLE.load(Ordering::SeqCst);
+
+    // If the handle is null, just return
+    if sys_table.is_null() {
+        //print!("Is Null\n");
+        return;
+    }
+    print!("Is Not Null!\n");
+
+    // Compute the size of a single entry from the configuration table
+    let config_table_entry_size = core::mem::size_of::<EfiConfigurationTableEntry>();
+
+    // Get a handle to the configuration table
+    let config_table = unsafe { (*sys_table).config_table };
+
+    // Get the number of table entries
+    let ntable_entries = unsafe { (*sys_table).ntable_entries };
+
+    // We start at entry 0
+    let mut entry_idx = 0;
+
+    // Loop until we still have entries to parse
+    while entry_idx < ntable_entries {
+        // Compute the entry's address
+        let entry_addr = config_table as usize + entry_idx * config_table_entry_size;
+        // Read the entry and convert it to the appropriate structure
+        let table_entry =
+            unsafe { core::ptr::read_unaligned(entry_addr as *const EfiConfigurationTableEntry) };
+        // Get the vendor guid
+        let guid = table_entry.vendor_guid;
+
+        if guid == EFI_ACPI_20_TABLE_GUID {
+            crate::print!("Found ACPI 2.0 table: {:x?}\n", guid);
+            acpi::read_rsdp(table_entry.vendor_table);
+        }
+
+        // Go to the next entry
+        entry_idx += 1;
+    }
 }
 
 /// The Simple Text Output Protocol defines the minimum requirements for a text-based `ConsoleOut`
